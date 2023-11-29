@@ -102,7 +102,7 @@ def get_array_of_color_distance(color_array, color):
     print("color_distance_array_sample: ", color_distance_array[10,40,1])
     return color_distance_array
 
-def get_color_range_from_color_and_distance_array(median_color, color_distance_array, expected_colors=None):
+def get_color_range_from_color_and_distance_array(median_color, color_distance_array, include_color_array=False, original_color_array=None, tolerance=10):
     print("get_color_range_from_color_and_distance_array: median_color: ", median_color)
     # Get the color range of color_array that is within distance of color
     color_range = np.zeros_like(color_distance_array, dtype=np.uint8)
@@ -112,10 +112,18 @@ def get_color_range_from_color_and_distance_array(median_color, color_distance_a
         for j in range(color_distance_array.shape[1]):
             for k in range(color_distance_array.shape[2]):
                 cells_to_process -= 1
-                color_range[i, j, k] = median_color[k] + color_distance_array[i, j, k]
-                #if the color range is not in the von luschan scale, set it to the median color
-                if expected_colors is not None and color_range[i, j, k] not in expected_colors:
-                    color_range[i, j, k] = median_color[k]
+                if(include_color_array is not None and original_color_array is not None):
+                    new_color = median_color[k] + color_distance_array[i, j, k]
+                    #get closest color in include_color_array
+                    closest_color_index = get_closest_color_index(new_color, include_color_array)
+                    #get the distance between the new color and the closest color in include_color_array
+                    closest_color = include_color_array[closest_color_index][0]
+                    #if the distance is less than tolerance, set the color to the closest color in include_color_array
+                    if distance.euclidean(new_color, closest_color) < tolerance:
+                        color_range[i, j, k] = closest_color
+                else:
+                    color_range[i, j, k] = median_color[k] + color_distance_array[i, j, k]
+                
 
     return color_range
 
@@ -183,10 +191,18 @@ def map_rgb_array_to_closest_color(rgb_array, color_array):
     print("map_rgb_array_to_closest_color")
     # Map rgb_array to the closest color in color_array
     rgb_array_new = np.zeros_like(rgb_array, dtype=np.uint8)
-    for i in range(rgb_array.shape[0]):
-        for j in range(rgb_array.shape[1]):
-            closest_color_index = get_closest_color_index(rgb_array[i, j], color_array)
-            rgb_array_new[i, j] = color_array[closest_color_index][0]
+    #check if the color_array is a list
+    if isinstance(color_array, list):
+        for i in range(rgb_array.shape[0]):
+            for j in range(rgb_array.shape[1]):
+                closest_color_index = get_closest_color_index(rgb_array[i, j], color_array)
+                rgb_array_new[i, j] = color_array[closest_color_index]
+    elif isinstance(color_array, np.ndarray):
+        for i in range(rgb_array.shape[0]):
+            for j in range(rgb_array.shape[1]):
+                closest_color_index = get_closest_color_index(rgb_array[i, j], color_array)
+                rgb_array_new[i, j] = color_array[closest_color_index]
+    
     
     return rgb_array_new
 
@@ -249,6 +265,16 @@ def define_von_luschan_scale():
     
     return von_luschan_scale
 
+def flatten_van_luschan_scale(von_luschan_scale):
+    print("flatten_van_luschan_scale")
+    # Flatten the Von Luschan scale
+    rgb_array_flat = np.zeros((100, 100, 3), dtype=np.uint8)
+    for key, value in von_luschan_scale.items():
+        for i in range(value.shape[0]):
+            for j in range(value.shape[1]):
+                rgb_array_flat[i, j] = value[i, j]
+
+    return rgb_array_flat
 def get_color_array_for_fitzpatrick_scale(fitzpatrick_scale_index):
     print("get_color_array_for_fitzpatrick_scale")
     # Define the Fitzpatrick scale
@@ -275,6 +301,8 @@ def get_color_array_for_fitzpatrick_scale(fitzpatrick_scale_index):
 # main
 # Define the Von Luschan scale
 von_luschan_scale = define_von_luschan_scale()
+#flatten the von luschan scale
+von_luschan_scale_flat = flatten_van_luschan_scale(von_luschan_scale)
 # open the image from argv[1]
 image_rgb_array = get_image_rgb_array(sys.argv[1])
 print("image_rgb_array.shape: ", image_rgb_array.shape)
@@ -286,22 +314,15 @@ print("von_luschan_scale_index: ", closest_color_index)
 fitzpatrick_scale_index = convert_von_luschan_scale_to_fitzpatrick_scale(closest_color_index)
 print("fitzpatrick_scale_index: ", fitzpatrick_scale_index)
 #remve all non luschan pixels
-image_rgb_array = remove_all_non_luschan_pixels(image_rgb_array, von_luschan_scale, closest_color_index)
+non_luschan = remove_all_non_luschan_pixels(image_rgb_array, von_luschan_scale, closest_color_index)
 #save the image
-save_rgb_array_as_image(image_rgb_array, "non_luschan_pixels_removed.png")
-#get the color distance array
-color_distance_array = get_array_of_color_distance(von_luschan_scale[closest_color_index], median_pixel_color)
+save_rgb_array_as_image(non_luschan, "non_luschan_pixels_removed.png")
+#get the distance map of the image
+color_distance_array = get_array_of_color_distance(image_rgb_array, median_pixel_color)
 #save the image
 save_rgb_array_as_image(color_distance_array, "color_distance_array.png")
-#get the color range
-color_range = get_color_range_from_color_and_distance_array(median_pixel_color, color_distance_array, von_luschan_scale[closest_color_index])
+#rebuild the image with the median pixel color 100, 100, 100
+new_median_color = [100, 100, 100]
+color_range = get_color_range_from_color_and_distance_array(new_median_color, color_distance_array, von_luschan_scale[closest_color_index], image_rgb_array, 10)
 #save the image
-save_rgb_array_as_image(color_range, "color_range.png")
-#set target color array
-target_color_array = von_luschan_scale[5]
-#scale the color range to the target color array
-color_range_scaled = scale_rgb_array_count_to_another(color_range, target_color_array)
-#map the color range to the target color array
-color_range_mapped = map_rgb_array_to_closest_color(color_range_scaled, target_color_array)
-#save the image
-save_rgb_array_as_image(color_range_mapped, "color_range_mapped.png")
+save_rgb_array_as_image(color_range, "color_range_replace.png")
