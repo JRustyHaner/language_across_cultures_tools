@@ -55,8 +55,18 @@ This repository contains a collection of scripts developed at the Institute of I
 
        - moviepy.editor (specifically VideoFileClip and AudioFileClip)
 
+4. **combine_cohmetrix_csvs.py**
 
-4. **convert_mkv_to_mp4.py**
+   - **Purpose:** Combines output from multiple cohmetrix csvs to one.
+
+   - **Dependencies:**
+
+       - os
+
+       - moviepy.editor (specifically VideoFileClip and AudioFileClip)
+
+
+5. **convert_mkv_to_mp4.py**
 
    - **Functionality:** Converts MKV files to MP4 files using the moviepy library.
 
@@ -67,7 +77,7 @@ This repository contains a collection of scripts developed at the Institute of I
        - moviepy.editor (specifically VideoFileClip)
 
 
-5. **convert_mp4_to_wmv_and_audio.py**
+6. **convert_mp4_to_wmv_and_audio.py**
 
    - **Purpose:** Convert .mp4 files in a folder to .wmv and .mp3 files.
 
@@ -80,7 +90,7 @@ This repository contains a collection of scripts developed at the Institute of I
        - moviepy.editor
 
 
-6. **convert_wmv_to_mp3_audio.py**
+7. **convert_wmv_to_mp3_audio.py**
 
    - **Purpose:** Convert .wmv files in a folder to .mp3 files.
 
@@ -93,7 +103,7 @@ This repository contains a collection of scripts developed at the Institute of I
        - moviepy.editor
 
 
-7. **dedirectoryify.py**
+8. **dedirectoryify.py**
 
    - **Purpose:** Move files from subdirectories to the current directory.
 
@@ -106,7 +116,7 @@ This repository contains a collection of scripts developed at the Institute of I
        - sys
 
 
-8. **directify_by_type.py**
+9. **directify_by_type.py**
 
    - **Purpose:** Organize files by moving them to folders based on their file extensions.
 
@@ -117,7 +127,7 @@ This repository contains a collection of scripts developed at the Institute of I
        - shutil
 
 
-9. **extract_csv_column_to_txt.py**
+10. **extract_csv_column_to_txt.py**
 
    - **Functionality:** Extract a specified column from a CSV file and write it to a text file.
 
@@ -134,7 +144,7 @@ This repository contains a collection of scripts developed at the Institute of I
        - pandas
 
 
-10. **fill_in_srt_vtt_unknowns.py**
+11. **fill_in_srt_vtt_unknowns.py**
 
    - **Purpose:** Replace <unk> tags in VTT and SRT files with words from the corresponding TXT file.
 
@@ -145,7 +155,7 @@ This repository contains a collection of scripts developed at the Institute of I
        - re
 
 
-11. **generate_json_and_srt_captions.py**
+12. **generate_json_and_srt_captions.py**
 
    - **Functionality:** Generate JSON and SRT files for all MP3 files in the MP3 folder using the Gentle server.
 
@@ -160,7 +170,7 @@ This repository contains a collection of scripts developed at the Institute of I
        - gentle server
 
 
-12. **group_srt_subtitles_into_short_sentences.py**
+13. **group_srt_subtitles_into_short_sentences.py**
 
    - **Purpose:** Combine subtitle entries based on specified conditions.
 
@@ -179,7 +189,7 @@ This repository contains a collection of scripts developed at the Institute of I
        - datetime
 
 
-13. **read_pdf_with_OCR.py**
+14. **read_pdf_with_OCR.py**
 
    - **Description:** Extract text from PDF files using PyMuPDF and Tesseract OCR.
 
@@ -197,8 +207,16 @@ This repository contains a collection of scripts developed at the Institute of I
 
        - pytesseract
 
+15. **remove_background_from_video.py**
 
-14. **scrape_pdf.py**
+   - **Description:** Removes the background of a video and replaces it with rgb green
+
+   - **Dependencies:**
+
+       - please see the script
+
+
+16. **scrape_pdf.py**
 
    - **Description:** Download PDF files from the UN website and save them to a directory named after the country code.
 
@@ -209,7 +227,7 @@ This repository contains a collection of scripts developed at the Institute of I
        - os
 
 
-15. **skinColorClassifier.py**
+17. **skinColorClassifier.py**
 
    - **Description:** Classify skin color on the Von Luschan scale using average pixel color of an image.
 
@@ -232,7 +250,7 @@ This repository contains a collection of scripts developed at the Institute of I
        - scipy.ndimage
 
 
-16. **superimpose_captions_on_wmv.py**
+18. **superimpose_captions_on_wmv.py**
 
    - **Description:** Superimpose captions on WMV video files using SRT files.
 
