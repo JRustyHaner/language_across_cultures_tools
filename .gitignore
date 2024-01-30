@@ -1,2 +1,12 @@
 APSR-scopus.csv
 scorpus_output
+*.png
+*.jpg
+*.pickle
+*.csv
+scopus_cohmetrix_output
+socpus_chatgpt
+scorpus_abstract_txt
+scopus_chatgpt_extracted
+bg_remove_wmv
+chat_gpt_response_abstracts
