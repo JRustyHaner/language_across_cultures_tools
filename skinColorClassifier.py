@@ -7,8 +7,10 @@ import numpy as np
 import scipy.spatial.distance as distance
 import PIL.Image as Image
 import cv2
+import csv
 import sys
 from scipy.ndimage import binary_dilation
+import rembg
 
 def print_persistent(prompt, message):
     print(prompt, end='', flush=True)
@@ -30,44 +32,60 @@ def get_image_rgb_array(image_path):
     #get the unique rgb values in the image
     unique_pixels = np.unique(image_rgb_array, axis=0)
     print("unique_pixels: ", unique_pixels.shape)
-
     return image_rgb_array
-def get_median_pixel_color(image_rgb_array, von_luschan_scale=False, green_screen_color=[0, 255, 0]):
+
+def get_transparent_image_rgb_array(image_path):
+    print("get_transparent_image_rgb_array")
+    image = Image.open(image_path)
+    image_rgb_array = np.array(image.convert('RGBA'))
+    #print some info about the image
+    print("image size: ", image.size)
+    print("image mode: ", image.mode)
+    print("image format: ", image.format)
+    #print the width and height of the image
+    width, height = image.size
+    print("width: ", width, "height: ", height)
+    return image_rgb_array
+
+def save_csv_from_array(array, output_path):
+    print("save_csv_from_array")
+    # Save the array as a csv
+    np.savetxt(output_path, array, delimiter=",", fmt='%d')
+
+def get_median_pixel_color(image_rgb_array, von_luschan_scale=False, green_screen_color=[0, 255, 0, 255]):
     print("get_median_pixel_color")
 
-    # Create boolean masks for green screen and non-von_luschan_scale pixels
-    green_screen_mask = np.all(image_rgb_array == green_screen_color, axis=-1)
-    non_von_luschan_scale_mask = np.ones_like(green_screen_mask, dtype=bool)
+    #if the image_rgb_array is a transparent image, change the green_screen_color to remove the alpha channel
+    if image_rgb_array.shape[2] == 3:
+        green_screen_color = green_screen_color[:3]
 
-    if von_luschan_scale:
-        for _, value in von_luschan_scale.items():
-            non_von_luschan_scale_mask &= ~np.isin(image_rgb_array, value).all(axis=-1)
+    #flatten the image_rgb_array from a 3d array to a np list of rgb values
+    image_rgb_array_flat = image_rgb_array.reshape(-1, image_rgb_array.shape[-1])
 
-    # Combine masks to filter out unwanted pixels
-    valid_pixels_mask = ~(green_screen_mask | non_von_luschan_scale_mask)
+    #remove the green screen color from the image_rgb_array_flat
+    image_rgb_array_flat = image_rgb_array_flat[~np.all(image_rgb_array_flat == green_screen_color, axis=1)]
 
-    # Apply masks to get valid pixels
-    valid_pixels = image_rgb_array[valid_pixels_mask]
+    #if von_luschan_scale is set, remove any colors in the image_rgb_array_flat that are not in the von_luschan_scale
+    if np.any(von_luschan_scale):
+        print("removing colors not in von_luschan_scale")
+        #we use np broadcasting to compare the image_rgb_array_flat to the von_luschan_scale, then we use np all to get a mask of the colors in the image_rgb_array_flat that are in the von_luschan_scale
+        von_luschan_scale_mask = np.isin(image_rgb_array_flat, von_luschan_scale).all(axis=-1)
+        #we use the von_luschan_scale_mask to remove the colors in the image_rgb_array_flat that are not in the von_luschan_scale
+        image_rgb_array_flat = image_rgb_array_flat[von_luschan_scale_mask]
+        
 
-    if len(valid_pixels) == 0:
-        return [0, 0, 0]  # Return a default color if no valid pixel found
-
+    #if the image_rgb_array_flat is empty, return the green_screen_color
+    if image_rgb_array_flat.size == 0:
+        return green_screen_color
+    
     # Calculate the median pixel color
-    median_pixel_color = np.median(valid_pixels, axis=0).astype(np.uint8)
+    median_pixel_color = np.median(image_rgb_array_flat, axis=0).astype(np.uint8)
     print("median_pixel_color: ", median_pixel_color)
 
     return median_pixel_color
 
 
 
-def is_color_von_luschon_scale(color, von_luschan_scale):
-    # Check if the color is in the Von Luschan scale (it's a dictionary of numpy arrays. The key is the von luschan scale category)
-    for key, value in von_luschan_scale.items():
-        if color in value:
-            return True
-        
-    return False
-    
 
 def get_array_of_colors_between_two_rgb_values(rgb1, rgb2):
     print("get_array_of_colors_between_two_rgb_values")
@@ -92,47 +110,55 @@ def get_array_of_colors_between_two_rgb_values(rgb1, rgb2):
 
 
 def get_closest_color_inside_array(target_color, color_array):
-    # Convert the target_color to a 1D NumPy array
-    target_color_array = np.array(target_color)
+    # Convert the target_color to a 1D NumPy array, if it is a dict or list
+    target_color = np.array(target_color)
 
-    # Calculate the Euclidean distances for all colors in color_array
-    distances = np.linalg.norm(color_array - target_color_array, axis=1)
+    #flatten the color_array from a dict of numpy arrays to a 2d array of rgb values
+    color_array_values = np.concatenate(list(color_array.values()))
 
-    # Find the index of the color with the minimum distance
+    # Find the distance between the target_color and each color in the color_array
+    distances = np.linalg.norm(color_array_values - target_color, axis=1)
+
+    # Find the index of the color with the minimum distance of the rgb values
     closest_index = np.argmin(distances)
 
-    # Return the closest color
-    closest_color = color_array[closest_index]
+    # Get the closest color inside the color_array
+    closest_color = color_array_values[closest_index]
+    print("closest_color: ", closest_color)
 
     return closest_color
 
+
 def get_x_y_index_of_color_or_closest_color_inside_array(color, color_array):
     print("get_x_y_index_of_color_or_closest_color_inside_array")
-    # Get the x,y index of the color or closest color inside the array
-    closest_color = color_array[0, 0, 0]
-    closest_color_distance = 255
-    x_index = 0
-    y_index = 0
-    for i in range(color_array.shape[0]):
-        for j in range(color_array.shape[1]):
-            for k in range(color_array.shape[2]):
-                color_distance = distance.euclidean(color, color_array[i, j])
-                if color_distance < closest_color_distance:
-                    closest_color_distance = color_distance
-                    closest_color = color_array[i, j]
-                    x_index = i
-                    y_index = j
-
+    #print array info
+    print("color_array shape: ", color_array.shape)
+    #if the color_array is an image of rgba values, remove the alpha channel
+    if color_array.shape[2] == 4:
+        color_array = color_array[:, :, :3]
+    color = np.array(color)
+    flat_color_array = color_array.reshape(-1, color_array.shape[-1])
+    # Calculate the Euclidean distances for all colors in color_array
+    distances = np.linalg.norm(flat_color_array - color, axis=1)
+    # Find the index of the color with the minimum distance
+    closest_index = np.argmin(distances)
+    #get the x and y index of the closest color
+    x_index = closest_index // color_array.shape[1]
+    y_index = closest_index % color_array.shape[1]
     print("x_index: ", x_index, "y_index: ", y_index)
     return x_index, y_index
 
 
+
 def get_von_lucian_scale_index_from_color(color, von_luschan_scale):
-    print("get_von_lucian_scale_index_from_color")
-    # Get the Von Luschan scale index from the color
+    print("get_von_lucian_scale_index_from_color", color)
+    #find the closest color in the von_luschan_scale (whuch is a dict of numpy arrays)
+    closest_color = get_closest_color_inside_array(color, von_luschan_scale)
+    #get the index of the closest color contained in the von_luschan_scale dict, and return the key
     for key, value in von_luschan_scale.items():
-        if np.array_equal(color, value):
+        if np.array_equal(closest_color, value):
             return key
+    return False
 
 
 def convert_von_luschan_scale_to_fitzpatrick_scale(von_luschan_scale_index):
@@ -151,13 +177,6 @@ def convert_von_luschan_scale_to_fitzpatrick_scale(von_luschan_scale_index):
         if von_luschan_scale_index in range(value[0], value[1] + 1):
             return key  
         
-
-def compare_all_von_luschan_scales_in_image_array(image_rgb_array, tolerance=100):
-    print("compare_all_von_luschan_scales_in_image_array")
-    von_luschan_scale = define_von_luschan_scale()
-    for i in range(len(von_luschan_scale)):
-        image_rgb_array_new = remove_all_pixels_not_found_in_color_array(image_rgb_array, von_luschan_scale, i, tolerance)
-        save_rgb_array_as_image(image_rgb_array_new, "./testimg/nambia-2-" + str(i) + "_tolerance_" + str(tolerance) + ".png")
 
 def get_array_of_color_distance(color_array, color, save=False):
     print("get_array_of_color_distance")
@@ -183,42 +202,27 @@ def get_array_of_color_distance(color_array, color, save=False):
     return color_distance_array
 
 
-def remove_background_from_image(image_rgb_array, von_luschan_scale_flat, tolerance=20, replacement_color=[0, 255, 0]):
+def remove_background_from_image(image_rgb_array, replacement_color=[0, 255, 0, 255]):
     print("remove_background_from_image")
-
-    # Use the color of the corner pixel as the background color
-    background_color = image_rgb_array[0, 0]
-    print("background_color: ", background_color)
-    image_rgb_array_new = np.copy(image_rgb_array)
-
-    # Create a mask for the background pixels
-    background_mask = np.all(image_rgb_array == background_color, axis=-1)
-
-    # Dilate the background mask to check surrounding pixels with distance tolerance
-    dilated_background_mask = binary_dilation(background_mask, structure=np.ones((3, 3)), iterations=tolerance)
-
-    # Create a mask for Von Luschan scale pixels
-    von_luschan_scale_mask = np.isin(image_rgb_array, von_luschan_scale_flat).all(axis=-1)
-
-    # Combine masks to filter out unwanted pixels
-    valid_pixels_mask = ~(background_mask | von_luschan_scale_mask | dilated_background_mask)
-
-    # Apply masks to get valid pixels and replace them with the replacement color
-    image_rgb_array_new[valid_pixels_mask] = replacement_color
-
-    return image_rgb_array_new
+    #remove the background from the image with rembg
+    image_rgb_array_removed_rgba = rembg.remove(image_rgb_array, alpha_matting=True, alpha_matting_foreground_threshold=240, alpha_matting_background_threshold=10)
+    #save the image_rgb_array_removed as an image
+    save_rgb_array_as_image(image_rgb_array_removed_rgba, "original_image_background_removed.png")
+    #open the image_rgb_array_removed as a rgba image
+    image_rgb_array_removed = get_transparent_image_rgb_array("original_image_background_removed.png")
+    #get the alpha channel where the alpha value is less than 255
+    alpha_channel = image_rgb_array_removed_rgba[:, :, 3] < 255
+    #save the alpha_channel as an image
+    save_rgb_array_as_image(alpha_channel, "alpha_channel.png")
+    #replace the alpha channel with the replacement_color
+    image_rgb_array_removed[alpha_channel] = replacement_color
+    image_rgb_array_removed_flat = image_rgb_array_removed[:, :, :3]
+    #save the image_rgb_array_removed as an image
+    save_rgb_array_as_image(image_rgb_array_removed_flat, "original_image_background_removed_greenscreen.png")
+    return image_rgb_array_removed_flat, image_rgb_array_removed
 
 
-def add_two_rgb_arrays(rgb_array1, rgb_array2):
-    print("add_two_rgb_arrays")
-    # Add two rgb arrays
-    rgb_array_sum = np.zeros_like(rgb_array1, dtype=np.uint8)
-    for i in range(rgb_array1.shape[0]):
-        for j in range(rgb_array1.shape[1]):
-            for k in range(rgb_array1.shape[2]):
-                rgb_array_sum[i, j, k] = rgb_array1[i, j, k] + rgb_array2[i, j, k]
 
-    return rgb_array_sum
                 
 def get_max_distance_betwewen_a_color_and_an_array_of_colors(color, color_array):
     print("get_max_distance_betwewen_a_color_and_an_array_of_colors")
@@ -341,10 +345,7 @@ def define_von_luschan_scale(load=False):
         (100,49,22),
         (101,48,32),
         (96,49,33),
-        (87,50,41),
-        (64,32,21),
-        (49,36,41),
-        (27,28,46)
+        (87,50,41)
     ]
     # get the rgb values for the colors between each pair of rgb values in the Von Luschan scale
     #crate numpy array of zeros with the shape of the number of colors between each pair of rgb values
@@ -356,6 +357,8 @@ def define_von_luschan_scale(load=False):
     if load:
         save_array_as_pickle(von_luschan_scale, load)
         print("saved von_luschan_scale to pickle")
+        #pretty print the von_luschan_scale
+        print("von_luschan_scale: ", von_luschan_scale)
 
     return von_luschan_scale
 
@@ -367,25 +370,15 @@ def flatten_van_luschan_scale(load=None, von_luschan_scale=None):
         if check_if_file_exists(load):
             von_luschan_scale = load_array_from_pickle(load)
             return von_luschan_scale
-
-    # Create a set to store unique arrays
-    valid_arrays = set()
-
-    # Iterate through each key in von_luschan_scale
-    for key, value in von_luschan_scale.items():
-        # Reshape the array to (n, 3) if needed
-        value = value.reshape(-1, 3) if value.ndim == 2 else value
-
-        # Use numpy unique function to get unique rows
-        unique_rows = np.unique(value, axis=0)
-
-        # Update valid_arrays with unique rows
-        valid_arrays.update(map(tuple, unique_rows))
-
-    # Convert the set back to a numpy array
-    von_luschan_scale = np.array(list(valid_arrays))
-
-    return von_luschan_scale
+        #we reshape the von_luschan_scale to a 2d array of rgb values. it currently is a 3d array of rgb values
+        print("reshaping von_luschan_scale")
+        #its a dictionary of numpy arrays, so we need to iterate through the dictionary and combine the numpy arrays
+        von_luschan_scale_flat = np.concatenate(list(von_luschan_scale.values()))
+        #save the von_luschan_scale_flat as a csv
+        save_array_as_pickle(von_luschan_scale_flat, load)
+        save_csv_from_array(von_luschan_scale_flat, load + ".csv")
+        print("saved von_luschan_scale_flat to pickle")
+        return von_luschan_scale_flat
 
 
     #convert the list to a numpy array
@@ -426,7 +419,7 @@ def convert_rgb_to_grey(r, g, b):
     grey = 0.299 * r + 0.587 * g + 0.114 * b
     return [grey, grey, grey]
 
-def get_bounding_box_with_flat_von_luscian(color_array, median_color_position, von_luschan_scale_flat, tolerance=100, exclude_color=None):
+def get_bounding_box_with_flat_von_luscian(color_array, median_color_position, von_luschan_scale_flat, tolerance=10, exclude_color=[0, 255, 0]):
     rows, cols, _ = color_array.shape
 
     center_x, center_y = median_color_position
@@ -437,29 +430,37 @@ def get_bounding_box_with_flat_von_luscian(color_array, median_color_position, v
     bound_bottom_right_x = center_x
     bound_bottom_right_y = center_y
 
-    for y in range(rows):
-        for x in range(cols):
-            r, g, b = color_array[y, x]
+    # Create a mask for the background pixels
+    exclude_colors_mask = np.all(np.isin(color_array, exclude_color), axis=-1)
 
-            # If exclude_color is set, skip the color if it matches the exclude_color
-            if exclude_color is not None and np.array_equal([r, g, b], exclude_color):
-                continue
+    # create a mask for the von_luschan_scale_flat pixels
+    von_luschan_scale_mask = np.isin(color_array, von_luschan_scale_flat).all(axis=-1)
 
-            dist = distance.euclidean([x, y], [center_x, center_y])  # Use [x, y] for 2D points
+    #combine the exclude_colors_mask and von_luschan_scale_mask
+    valid_pixels_mask = ~(exclude_colors_mask | von_luschan_scale_mask)
 
-            if dist < tolerance:
-                if x < center_x and x < bound_top_left_x:
-                    bound_top_left_x = x
+    #save the valid_pixels_mask as an image
+    save_rgb_array_as_image(valid_pixels_mask, "valid_pixels_mask.png")
 
-                if y < center_y and y < bound_top_left_y:
-                    bound_top_left_y = y
+    #dilate the valid_pixels_mask to the tolerance
+    dilated_valid_pixels_mask = binary_dilation(valid_pixels_mask, structure=np.ones((3, 3)), iterations=tolerance)
 
-                if x > center_x and x > bound_bottom_right_x:
-                    bound_bottom_right_x = x
+    #find the bounding box of the dilated_valid_pixels_mask where the mask value is true
+    for i in range(rows):
+        for j in range(cols):
+            if dilated_valid_pixels_mask[i, j]:
+                if i < bound_top_left_x:
+                    bound_top_left_x = i
+                if i > bound_bottom_right_x:
+                    bound_bottom_right_x = i
+                if j < bound_top_left_y:
+                    bound_top_left_y = j
+                if j > bound_bottom_right_y:
+                    bound_bottom_right_y = j
 
-                if y > center_y and y > bound_bottom_right_y:
-                    bound_bottom_right_y = y
-
+    #print the percentage of colors in the array that are in the von_luschan_scale_flat (where the mask value is true)
+    print("percentage of colors in the array that are in the von_luschan_scale_flat: ", np.count_nonzero(von_luschan_scale_mask) / von_luschan_scale_mask.size * 100, "%")
+    
     return bound_top_left_x, bound_bottom_right_x, bound_top_left_y, bound_bottom_right_y, center_x, center_y
 
 
@@ -495,9 +496,10 @@ def draw_bounding_box_on_image(image_rgb_array, x1, x2, y1, y2, x_center=False, 
     cv2.putText(image_rgb_array_bounding_box, f"({x2}, {y1})", (y1, x2), font, font_scale, (255, 255, 255), font_thickness)
     cv2.putText(image_rgb_array_bounding_box, f"({x2}, {y2})", (y2, x2), font, font_scale, (255, 255, 255), font_thickness)
 
-    # Draw the center of the bounding box on the image
-    if x_center and y_center:
-        cv2.circle(image_rgb_array_bounding_box, (x_center, y_center), radius=10, color=(255, 255, 255), thickness=1)
+    #draw a cross at the x_center and y_center
+    cv2.line(image_rgb_array_bounding_box, (y_center - 10, x_center), (y_center + 10, x_center), (255, 255, 255), 1)
+    cv2.line(image_rgb_array_bounding_box, (y_center, x_center - 10), (y_center, x_center + 10), (255, 255, 255), 1)
+
 
     return image_rgb_array_bounding_box
 
@@ -509,35 +511,27 @@ def draw_bounding_boxes_on_image(image_rgb_array, bounding_boxes):
 
     return image_rgb_array_bounding_boxes
 
-def add_rgb_to_all_pixels(image_array, rgb_value):
-    #create a copy of the image array
-    image_array_new = np.copy(image_array)
-    #add the rgb value to all pixels
-    image_array_new[:, :, 0] += rgb_value[0]
-    image_array_new[:, :, 1] += rgb_value[1]
-    image_array_new[:, :, 2] += rgb_value[2]
-    return image_array_new
-
-def mask_array_inside_bbox(array, array2, bbox):
-    print("mask_array_inside_bbox")
-    #replace the values in array inside the bounding box with the values in array2
-    array_new = np.copy(array)
-    array_new[bbox[0]:bbox[1], bbox[2]:bbox[3]] = array2[bbox[0]:bbox[1], bbox[2]:bbox[3]]
-    return array_new
-
 def replace_colors_with_closest_von_luschan_color(image_rgb_array, von_luschan_scale_flat, tolerance=100, chunk_size=1000):
     print("replace_colors_with_closest_von_luschan_color")
 
+    #save the von_luschan_scale_flat as a csv
+    save_csv_from_array(von_luschan_scale_flat, "von_luschan_scale_flat.csv")
+
     height, width, channels = image_rgb_array.shape
+    print("height: ", height, "width: ", width, "channels: ", channels)
 
     # Reshape the image to a 2D array of pixels
-    pixels = image_rgb_array.reshape((-1, channels))
+    print("reshaping image_rgb_array")
+    pixels = np.array(image_rgb_array.reshape((-1, channels)))
 
     # Calculate the number of chunks
+    print("calculating the number of chunks")
     num_chunks = int(np.ceil(len(pixels) / chunk_size))
+    print("num_chunks: ", num_chunks)
 
     # Process the image in chunks
     for i in range(num_chunks):
+        print("processing chunk: ", i)
         start_idx = i * chunk_size
         end_idx = min((i + 1) * chunk_size, len(pixels))
 
@@ -556,6 +550,14 @@ def replace_colors_with_closest_von_luschan_color(image_rgb_array, von_luschan_s
         # Replace the corresponding pixels in the chunk
         pixels[start_idx:end_idx] = closest_colors
 
+        #print a index of the chunk and it's resulting closest_colors
+        print("chunk_color_at_index_0: ", chunk_pixels[0], "closest_color_at_index_0: ", closest_colors[0])
+
+        #check if closest_colors[0] is in von_luschan_scale_flat
+        if not np.isin(closest_colors[0], von_luschan_scale_flat).all(axis=-1):
+            print("closest_colors[0] is not in von_luschan_scale_flat")
+        
+
     # Reshape the resulting array back to the original image shape
     image_rgb_array_replaced = pixels.reshape((height, width, channels))
 
@@ -563,14 +565,20 @@ def replace_colors_with_closest_von_luschan_color(image_rgb_array, von_luschan_s
 
 def replace_colors_with_closest_von_luschan_color_from_index(image_rgb_array, von_luschan_scale, color_index, tolerance=100, chunk_size=1000):
     print("replace_colors_with_closest_von_luschan_color_from_index")
+    print("image_rgb_array shape: ", image_rgb_array.shape)
+    height, width, channels = np.array(image_rgb_array).shape
+    
 
-    height, width, channels = image_rgb_array.shape
-
-    # Reshape the image to a 2D array of pixels
-    pixels = image_rgb_array.reshape((-1, channels))
+    # Reshape the image to a 2D array of pixels using np
+    print("reshaping image_rgb_array")
+    pixels = np.array(image_rgb_array.reshape((-1, channels)))
 
     # Get the color array for the specified index
+    print("getting the color_array for the specified index")
     color_array = von_luschan_scale[color_index]
+
+    #print some info about the color_array
+    print("color_array shape: ", color_array.shape)
 
     # Calculate the number of chunks
     num_chunks = int(np.ceil(len(pixels) / chunk_size))
@@ -630,6 +638,39 @@ def replace_skin_tone_with_target_von_luscian_scale(original_image_array, von_lu
     return image_rgb_array_replaced
 
 
+def shift_von_luschan_colors_in_array_to_new_median_color(image_rgb_array, von_luschan_scale_flat, target_median_color, tolerance=100, chunk_size=1000):
+    print("shift_von_luschan_colors_in_array_to_new_median_color")
+    #get the median color of the image_rgb_array
+    median_color = get_median_pixel_color(image_rgb_array)
+    print("median_color: ", median_color)
+    #get the distance between the median color and the target median color 
+    r_distance = target_median_color[0] - median_color[0]
+    g_distance = target_median_color[1] - median_color[1]
+    b_distance = target_median_color[2] - median_color[2]
+    print("r_distance: ", r_distance, "g_distance: ", g_distance, "b_distance: ", b_distance)
+    distances = np.array([r_distance, g_distance, b_distance])
+    #we only want to shift the colors in the von_luschan_scale_flat
+    #get the unique colors in the image_rgb_array
+    unique_pixels = np.unique(image_rgb_array, axis=0)
+    print("unique_pixels: ", unique_pixels.shape)
+    #get the unique colors in the von_luschan_scale_flat
+    unique_von_luschan_scale_flat = np.unique(von_luschan_scale_flat, axis=0)
+    print("unique_von_luschan_scale_flat: ", unique_von_luschan_scale_flat.shape)
+    #get the unique colors in the von_luschan_scale_flat that are also in the image_rgb_array
+    unique_von_luschan_scale_flat_in_image = np.intersect1d(unique_von_luschan_scale_flat, unique_pixels)
+    print("unique_von_luschan_scale_flat_in_image: ", unique_von_luschan_scale_flat_in_image.shape)
+    #get the unique colors in the von_luschan_scale_flat that are not in the image_rgb_array
+    unique_von_luschan_scale_flat_not_in_image = np.setdiff1d(unique_von_luschan_scale_flat, unique_pixels)
+    print("unique_von_luschan_scale_flat_not_in_image: ", unique_von_luschan_scale_flat_not_in_image.shape)
+    #shift the unique colors in the von_luschan_scale_flat that are also in the image_rgb_array using numpy broadcasting
+    unique_von_luschan_scale_flat_in_image_shifted = unique_von_luschan_scale_flat_in_image + distances
+    print("unique_von_luschan_scale_flat_in_image_shifted: ", unique_von_luschan_scale_flat_in_image_shifted.shape)
+    #combine the unique_von_luschan_scale_flat_in_image_shifted and unique_von_luschan_scale_flat_not_in_image
+    unique_von_luschan_scale_flat_shifted = np.concatenate((unique_von_luschan_scale_flat_in_image_shifted, unique_von_luschan_scale_flat_not_in_image))
+    print("unique_von_luschan_scale_flat_shifted: ", unique_von_luschan_scale_flat_shifted.shape)
+    #replace the unique pixels in the image with the scaled unique_target_pixels
+    image_rgb_array_replaced = replace_colors_with_closest_von_luschan_color(image_rgb_array, unique_von_luschan_scale_flat_shifted, tolerance, chunk_size)
+    return image_rgb_array_replaced
 
 
 
@@ -648,11 +689,36 @@ von_luschan_scale = define_von_luschan_scale(von_luschan_scale_path)
 #flatten the von luschan scale
 von_luschan_scale_flat = flatten_van_luschan_scale(von_luschan_scale_flat_path, von_luschan_scale)
 
-#replace colors with closest von luschan color
-image_rgb_array_replaced = replace_colors_with_closest_von_luschan_color(image_rgb_array, von_luschan_scale_flat, tolerance=250, chunk_size=1000)
+#remove the background from the image
+image_rgb_array_removed_flat, image_rgb_array_removed = remove_background_from_image(image_rgb_array)
 
-#replace skin tone with target von luscian scale
-replaced_image = replace_skin_tone_with_target_von_luscian_scale(image_rgb_array, von_luschan_scale, 10)
+#save the image_rgb_array_removed as an image
+save_rgb_array_as_image(image_rgb_array_removed, "original_image_background_removed.png")
 
-#save the replaced image
-save_rgb_array_as_image(replaced_image, original_image_name + "_replaced.png")
+#get the median color of the image_rgb_array_removed
+median_color = get_median_pixel_color(image_rgb_array_removed_flat, von_luschan_scale_flat)
+
+#pretty print the median_color
+print("median_color: ", median_color)
+
+#find the median colors' position in the image_rgb_array_removed
+median_color_position = get_x_y_index_of_color_or_closest_color_inside_array(median_color, image_rgb_array_removed_flat)
+
+#pretty print the median_color_position
+print("median_color_position: ", median_color_position)
+
+#get the von_luschan_scale_index from the median_color
+von_luschan_scale_index = get_von_lucian_scale_index_from_color(median_color, von_luschan_scale)
+print("von_luschan_scale_index: ", von_luschan_scale_index)
+
+#find the bounding box of the median color in the image_rgb_array_removed
+x1, x2, y1, y2, x_center, y_center = get_bounding_box_with_flat_von_luscian(image_rgb_array_removed_flat, median_color_position, von_luschan_scale_flat)
+
+#pretty print the bounding box
+print("bounding box: ", x1, x2, y1, y2)
+
+#draw the bounding box on the image_rgb_array_removed
+image_rgb_array_bounding_box = draw_bounding_box_on_image(image_rgb_array_removed_flat, x1, x2, y1, y2, x_center, y_center)
+
+#save the image_rgb_array_bounding_box as an image
+save_rgb_array_as_image(image_rgb_array_bounding_box, "image_rgb_array_bounding_box.png")
