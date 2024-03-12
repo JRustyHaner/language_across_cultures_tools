@@ -261,3 +261,11 @@ This repository contains a collection of scripts developed at the Institute of I
        - pysrt
 
        - os
+
+19. **get_highest_imotions_values_from_wmv**
+
+    - **Description:** Gets an image of the frame with the highest emotion values given a video and imotions csv data
+
+   - **Dependencies:**
+
+       - pandas, numpy, cv2
