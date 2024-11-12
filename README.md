@@ -207,6 +207,15 @@ This repository contains a collection of scripts developed at the Institute of I
 
        - pytesseract
 
+15. **remove_background_from_video_pytorch.py**
+
+   - **Description:** Removes the background of a video and replaces it with no backgound
+   uses pytorch. 
+
+   - **Dependencies:**
+
+       - please see the script
+
 15. **remove_background_from_video.py**
 
    - **Description:** Removes the background of a video and replaces it with rgb green

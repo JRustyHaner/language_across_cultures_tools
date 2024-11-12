@@ -10,3 +10,6 @@ scorpus_abstract_txt
 scopus_chatgpt_extracted
 bg_remove_wmv
 chat_gpt_response_abstracts
+*.txt
+*.pdf
+*.jpeg
