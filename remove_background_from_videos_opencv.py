@@ -5,8 +5,6 @@ import os
 import sys
 import cv2
 import csv
-import threading
-import queue
 import concurrent.futures
 import logging
 import rembg
@@ -276,4 +274,3 @@ if __name__ == "__main__":
     max_workers = int(sys.argv[3])
 
     main(input_folder, output_folder)
-
