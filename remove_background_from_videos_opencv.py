@@ -86,7 +86,7 @@ def extract_frames(video, temp_dir, segment_number, segment_duration=2, video_na
             break
         # Save the frame as a png file
         frame_path = os.path.join(temp_dir, f"{video_name}_segment_{segment_number}_frame_{frame_number}.png")
-        cv2.imwrite(frame_path, rembg.remove(frame))
+        cv2.imwrite(frame_path, frame)
         logger.info(f"Saved frame {frame_number} of segment {segment_number} of video {video_name} to {frame_path}")
         frame_number += 1
 
@@ -153,26 +153,37 @@ def main(input_folder, output_folder, max_workers=4):
         logger.info(f"Processing video {video_name} with {total_frames} frames at {fps} fps")
         print(f"There are {num_segments} segments in the video {video_name}. Frames per segment: {fps * chunk_duration}")
 
-        def process_video(video_path, video_name, output_folder, segment_number, chunk_duration):
-            #check if the segment has already been processed
-            if check_processed(output_folder, video_name, segment_number, 0):
-                print(f"Segment {segment_number} of video {video_name} has already been processed. Skipping...")
-                return
-            temp_dir = os.path.join(output_folder, f"{video_name}_segment_{segment_number}")
+        #for each segment, extract the frames, remove the background and save the processed frames
+        for segment_number in range(num_segments):
+            temp_dir = os.path.join(output_folder, "temp_" + video_name + "_segment_" + str(segment_number))
             if not os.path.exists(temp_dir):
                 os.makedirs(temp_dir)
+            # Check if the segment has already been processed
+            if check_processed(output_folder, video_name, segment_number, 0):
+                print(f"Segment {segment_number} of video {video_name} has already been processed. Skipping...")
+                continue
+            # Extract frames from the video
             video = cv2.VideoCapture(video_path)
             video.set(cv2.CAP_PROP_POS_FRAMES, segment_number * fps * chunk_duration)
-            logger.info(f"Processing video {video_name}, segment {segment_number}")
+            #extract frames concurrently
             extract_frames(video, temp_dir, segment_number, chunk_duration, video_name)
+            frame_paths = []
+            #go through all the segment and get the paths of the frames
+            for frame_number in range(int(fps * chunk_duration)):
+                frame_path = os.path.join(temp_dir, f"{video_name}_segment_{segment_number}_frame_{frame_number}.png")
+                frame_paths.append(frame_path)
 
             
-
-        #for each segment, extract the frames
-        for segment_number in range(num_segments):
+            def remove_background_from_frame(path):
+                frame = cv2.imread(path)
+                frame = rembg.remove(frame)
+                cv2.imwrite(path, frame)
+                return path
+            
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                executor.map(process_video, [video_path] * num_segments, [video_name] * num_segments, [output_folder] * num_segments, [segment_number] * num_segments, [CHUNK_DURATION] * num_segments)
-        
+                executor.map(remove_background_from_frame, frame_paths)
+                
+
 
     print("All videos processed successfully")
 
