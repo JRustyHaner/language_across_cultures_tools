@@ -28,8 +28,8 @@ def main_function(input_folder, output_folder_wmv):
             df = pd.DataFrame(columns=['filename'])
             df.to_csv(csv_filename, index=False)
         #if all wmv files are inside the csv file, then wait 60 seconds before checking again
-        #get all wmv files
-        wmv_files = [f for f in os.listdir(output_folder_wmv) if f.endswith('.wmv' and not f.startswith('#'))]
+        #get all wmv files ignoring starts with #
+        wmv_files = [f for f in os.listdir(output_folder_wmv) if f.endswith('.wmv') and not f.startswith('#')]
         if len(wmv_files) == len(df):
             print('All files have been converted')
             time.sleep(60)
