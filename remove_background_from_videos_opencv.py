@@ -20,7 +20,7 @@ CHUNK_DURATION = 2  # Duration of each chunk in seconds
 logging.basicConfig(filename='remove_background_from_videos_opencv.log', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 index_file = "index.csv"
-index = pd.DataFrame(columns=["Video Name", "Processed Video Name", "Segment Number","Frame Number", "Action"])
+index = pd.DataFrame(columns=["Video Name", "Processed Video Name", "Segment Number", "Action"])
 
 
 # function to create the index file
@@ -32,14 +32,14 @@ def create_index_file(output_folder):
     logger.info(f"Index file created successfully in the output folder")
 
 # function to write the processed video name, segment number and the path to the index file
-def write_to_index_file(output_folder, video_name, processed_video_name, segment_number, frame_number, action):
+def write_to_index_file(output_folder, video_name, processed_video_name, segment_number, action):
     global index
     #get one directory above the output folder
     logger.info(f"Writing to index file in the output folder: {output_folder}")
     #read the index file
     if os.path.exists(os.path.join(output_folder, index_file)):
         index = pd.read_csv(os.path.join(output_folder, index_file))
-    new_pd = pd.DataFrame([[video_name, processed_video_name, segment_number, frame_number, action]], columns=["Video Name", "Processed Video Name", "Segment Number", "Frame Number", "Action"])
+    new_pd = pd.DataFrame([[video_name, processed_video_name, segment_number, action]], columns=["Video Name", "Processed Video Name", "Segment Number", "Action"])
     index = pd.concat([index, new_pd], ignore_index=True)
     index.to_csv(os.path.join(output_folder, index_file), index=False)
     print(f"Written to index file in the output folder: {output_folder}")
@@ -48,13 +48,11 @@ def write_to_index_file(output_folder, video_name, processed_video_name, segment
                   
     logger.info(f"Written to index file successfully in the output folder")
 
-# function to check if the segment and frame have already been processed
+# function to check if the segment has already been processed
 def check_processed(output_folder, video_name, segment_number, frame_number):
-    logger.info(f"Checking if the segment and frame have already been processed in the output folder and the pd")
-    if os.path.exists(os.path.join(output_folder, index_file)):
-        index = pd.read_csv(os.path.join(output_folder, index_file))
-        if len(index[(index["Video Name"] == video_name) & (index["Segment Number"] == segment_number) & (index["Frame Number"] == frame_number)]) > 0:
-            return True
+    logger.info(f"Checking if the segment has already been processed...")
+    if os.path.exists(os.path.join(output_folder, f"{video_name}_segment_{segment_number}_frame_{frame_number}.png")):
+        return True
     return False
 
 
@@ -69,28 +67,29 @@ def get_files(input_folder):
                 # remove any that end in .wmv.wmv
                 if file.endswith(".wmv.wmv"):
                     continue
-                # ignore files that start with #
-                if file.startswith("#"):
-                    continue
                 video_path = os.path.join(root, file)
                 list_of_files[video_path] = file
     logger.info(f"Found {len(list_of_files)} video files in the input folder")
 
 # extract frames concurrently
-def extract_frames(video, temp_dir, segment_start=0, segment_duration=CHUNK_DURATION, segment_number=0, video_name="video"):
+def extract_frames_and_remove_bg(video, temp_dir, segment_number, segment_duration=2, video_name="video"):
     logger.info(f"Extracting frames from video...")
     success, frame = video.read()
     count = 0
+    parent_dir = os.path.dirname(temp_dir)
+    write_to_index_file(parent_dir, video_name, f"{video_name}_segment_{segment_number}", segment_number, "Extracted")
 
     while success and count < segment_duration * video.get(cv2.CAP_PROP_FPS):
         frame_path = os.path.join(temp_dir, f"{video_name}_segment_{segment_number}_frame_{count}.png")
-        cv2.imwrite(frame_path, frame)
+        print(f"Writing frame {count} to {frame_path} with background removed")
+        write_to_index_file(parent_dir, video_name, f"{video_name}_segment_{segment_number}_frame_{count}", segment_number, "Processed")
+        cv2.imwrite(frame_path, rembg.remove(frame))
         count += 1
         #every 30 frames, we will print the progress
         if count % 30 == 0:
             logger.info(f"Extracted {count} frames out of {segment_duration * video.get(cv2.CAP_PROP_FPS)} frames")
-        parent_dir = os.path.dirname(temp_dir)
-        write_to_index_file(parent_dir, video_name, f"{video_name}_segment_{segment_number}.wmv", segment_number, count, "Extracted")
+    
+    
         
 
     video.release()
@@ -115,7 +114,7 @@ def process_video(temp_dir, segment_number, video_name):
             else:
                 print(f"File {file} has already been processed. Skipping...")
             print(f"Processed file #{file} out of {file_count_total}")
-            write_to_index_file(temp_dir, video_name, f"{video_name}_segment_{segment_number}.wmv", segment_number, frame_number, "Processed")
+            
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
         executor.map(process_frame, os.listdir(temp_dir))
@@ -156,24 +155,22 @@ def main(input_folder, output_folder, max_workers=4):
         logger.info(f"Processing video {video_name} with {total_frames} frames at {fps} fps")
         print(f"There are {num_segments} segments in the video {video_name}. Frames per segment: {fps * chunk_duration}")
 
-        for segment_number in range(num_segments):
-            #ch
-            print(f"Processing segment {segment_number} of {num_segments} for video {video_name}...")
-            segment_start = segment_number * chunk_duration * fps
-            segment_end = min((segment_number + 1) * chunk_duration * fps, total_frames)
-
+        #for each segment, extract the frames, process the frames and then create the video using concurrenct futures
+        def process(segment_number):
+            print(f"Processing segment {segment_number} of video {video_name}")
+            temp_dir = os.path.join(output_folder, f"{video_name}_segment_{segment_number}")
+            if not os.path.exists(temp_dir):
+                os.makedirs(temp_dir)
             video = cv2.VideoCapture(video_path)
-            temp_dir = os.path.join(output_folder, f"temp_{video_name}_{segment_number}")
-            os.makedirs(temp_dir, exist_ok=True)
+            video.set(cv2.CAP_PROP_POS_FRAMES, segment_number * fps * chunk_duration)
+            extract_frames_and_remove_bg(video, temp_dir, segment_number=segment_number, video_name=video_name)
+            delete_temp_files(temp_dir)
+            write_to_index_file(output_folder, video_name, f"{video_name}_segment_{segment_number}", segment_number, "Processed")
+            print(f"Processed segment {segment_number} of video {video_name}")
 
-            # Extract frames for the current segment
-            extract_frames(video, temp_dir, segment_start, chunk_duration, segment_number, video_name)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            executor.map(process, range(num_segments))
 
-            # Process frames to remove background
-            process_video(temp_dir, segment_number, video_name)
-
-
-            video.release()
 
 
 
