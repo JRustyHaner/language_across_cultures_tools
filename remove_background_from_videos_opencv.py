@@ -74,20 +74,25 @@ def get_files(input_folder):
 
 # extract frames concurrently
 def extract_frames(video, temp_dir, segment_number, segment_duration=2, video_name="video"):
-    print(f"Extracting frames from video...")
+    print(f"Extracting frames from video segment {segment_number}...")
     logger.info(f"Extracting frames from video {video_name}, segment {segment_number}, duration {segment_duration} seconds")
     #read the video
     fps = video.get(cv2.CAP_PROP_FPS)
     total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
     frame_number = 0
     while frame_number < fps * segment_duration:
+        #if the frame has already been processed, skip it
+        if check_processed(temp_dir, video_name, segment_number, frame_number):
+            print(f"Frame {frame_number} of segment {segment_number} of video {video_name} has already been processed. Skipping...")
+            frame_number += 1
+            continue
         ret, frame = video.read()
         if not ret:
             break
         # Save the frame as a png file
         frame_path = os.path.join(temp_dir, f"{video_name}_segment_{segment_number}_frame_{frame_number}.png")
         cv2.imwrite(frame_path, frame)
-        logger.info(f"Saved frame {frame_number} of segment {segment_number} of video {video_name} to {frame_path}")
+        print(f"Saved frame {frame_number} to {frame_path}")
         frame_number += 1
 
     video.release()
@@ -158,8 +163,8 @@ def main(input_folder, output_folder, max_workers=4):
             temp_dir = os.path.join(output_folder, "temp_" + video_name + "_segment_" + str(segment_number))
             if not os.path.exists(temp_dir):
                 os.makedirs(temp_dir)
-            # Check if the segment has already been processed
-            if check_processed(output_folder, video_name, segment_number, 0):
+            # Check if the segment has already been processed by checking if the output directory exists
+            if os.path.exists(os.path.join(output_folder, f"{video_name}_segment_{segment_number}")):
                 print(f"Segment {segment_number} of video {video_name} has already been processed. Skipping...")
                 continue
             # Extract frames from the video
