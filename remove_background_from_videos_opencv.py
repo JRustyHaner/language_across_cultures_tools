@@ -163,6 +163,9 @@ def main(input_folder, output_folder, max_workers=4):
             temp_dir = os.path.join(output_folder, "temp_" + video_name + "_segment_" + str(segment_number))
             if not os.path.exists(temp_dir):
                 os.makedirs(temp_dir)
+            else:
+                print(f"Temporary directory {temp_dir} already exists. Skipping...")
+                continue
             # Check if the segment has already been processed by checking if the output directory exists
             if os.path.exists(os.path.join(output_folder, f"{video_name}_segment_{segment_number}")):
                 print(f"Segment {segment_number} of video {video_name} has already been processed. Skipping...")
