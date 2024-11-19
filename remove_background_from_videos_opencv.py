@@ -180,6 +180,10 @@ def main(input_folder, output_folder, max_workers=4):
 
             
             def remove_background_from_frame(path):
+                #if the processed frame already exists, skip it
+                if os.path.exists(path.replace("frame", "processed_frame")):
+                    print(f"Frame {path} has already been processed. Skipping...")
+                    return path
                 frame = cv2.imread(path)
                 frame = rembg.remove(frame)
                 cv2.imwrite(path, frame)
