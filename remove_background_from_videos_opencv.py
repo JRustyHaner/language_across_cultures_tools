@@ -20,7 +20,7 @@ CHUNK_DURATION = 2  # Duration of each chunk in seconds
 logging.basicConfig(filename='remove_background_from_videos_opencv.log', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 index_file = "index.csv"
-index = pd.DataFrame(columns=["Video Name", "Processed Video Name", "Segment Number"])
+index = pd.DataFrame(columns=["Video Name", "Processed Video Name", "Segment Number","Frame Number", "Action"])
 
 
 # function to create the index file
@@ -32,25 +32,29 @@ def create_index_file(output_folder):
     logger.info(f"Index file created successfully in the output folder")
 
 # function to write the processed video name, segment number and the path to the index file
-def write_to_index_file(output_folder, video_name, processed_video_name, segment_number):
+def write_to_index_file(output_folder, video_name, processed_video_name, segment_number, frame_number, action):
+    global index
+    #get one directory above the output folder
     logger.info(f"Writing to index file in the output folder: {output_folder}")
-    with open(os.path.join(output_folder, index_file), "a", newline="") as file:
-        writer = csv.writer(file)
-        writer.writerow([video_name, processed_video_name, segment_number])
+    #read the index file
+    if os.path.exists(os.path.join(output_folder, index_file)):
+        index = pd.read_csv(os.path.join(output_folder, index_file))
+    new_pd = pd.DataFrame([[video_name, processed_video_name, segment_number, frame_number, action]], columns=["Video Name", "Processed Video Name", "Segment Number", "Frame Number", "Action"])
+    index = pd.concat([index, new_pd], ignore_index=True)
+    index.to_csv(os.path.join(output_folder, index_file), index=False)
+    print(f"Written to index file in the output folder: {output_folder}")
+
+        
+                  
     logger.info(f"Written to index file successfully in the output folder")
 
-# function to check if the segment has already been processed
-def check_segment_processed(output_folder, video_name, segment_number):
-    logger.info(f"Checking if the segment has already been processed...")
+# function to check if the segment and frame have already been processed
+def check_processed(output_folder, video_name, segment_number, frame_number):
+    logger.info(f"Checking if the segment and frame have already been processed in the output folder and the pd")
     if os.path.exists(os.path.join(output_folder, index_file)):
-        with open(os.path.join(output_folder, index_file), "r") as file:
-            reader = csv.reader(file)
-            next(reader)  # Skip header row
-            for row in reader:
-                if row[0] == video_name and int(row[2]) == segment_number:
-                    logger.info(f"Segment {segment_number} of video {video_name} has already been processed")
-                    return True
-    logger.info(f"Segment {segment_number} of video {video_name} has not been processed yet")
+        index = pd.read_csv(os.path.join(output_folder, index_file))
+        if len(index[(index["Video Name"] == video_name) & (index["Segment Number"] == segment_number) & (index["Frame Number"] == frame_number)]) > 0:
+            return True
     return False
 
 
@@ -65,34 +69,41 @@ def get_files(input_folder):
                 # remove any that end in .wmv.wmv
                 if file.endswith(".wmv.wmv"):
                     continue
+                # ignore files that start with #
+                if file.startswith("#"):
+                    continue
                 video_path = os.path.join(root, file)
                 list_of_files[video_path] = file
     logger.info(f"Found {len(list_of_files)} video files in the input folder")
 
 # extract frames concurrently
-def extract_frames(video, temp_dir, segment_start=0, segment_duration=CHUNK_DURATION):
+def extract_frames(video, temp_dir, segment_start=0, segment_duration=CHUNK_DURATION, segment_number=0, video_name="video"):
     logger.info(f"Extracting frames from video...")
     success, frame = video.read()
     count = 0
 
     while success and count < segment_duration * video.get(cv2.CAP_PROP_FPS):
-        frame_path = os.path.join(temp_dir, f"frame_{count}.png")
+        frame_path = os.path.join(temp_dir, f"{video_name}_segment_{segment_number}_frame_{count}.png")
         cv2.imwrite(frame_path, frame)
         count += 1
         #every 30 frames, we will print the progress
         if count % 30 == 0:
             logger.info(f"Extracted {count} frames out of {segment_duration * video.get(cv2.CAP_PROP_FPS)} frames")
+        parent_dir = os.path.dirname(temp_dir)
+        write_to_index_file(parent_dir, video_name, f"{video_name}_segment_{segment_number}.wmv", segment_number, count, "Extracted")
         
 
     video.release()
 
-def process_video(temp_dir):
+def process_video(temp_dir, segment_number, video_name):
     # Remove all backgrounds of png files in the temp_dir using rembg with multithreading
     logger.info(f"Removing background from frames using rembg with multithreading...")
     file_count_total = len([f for f in os.listdir(temp_dir) if f.endswith(".png")])
     
     def process_frame(file):
         print(f"Processing file #{file} out of {file_count_total}")
+        #parse the video name, segment number and frame number from the file name
+        video_name, segment_number, frame_number = file.split("_")
         if file.endswith(".png"):
             if not file.startswith("processed_"):
                 input_file = os.path.join(temp_dir, file)
@@ -104,91 +115,15 @@ def process_video(temp_dir):
             else:
                 print(f"File {file} has already been processed. Skipping...")
             print(f"Processed file #{file} out of {file_count_total}")
-    
+            write_to_index_file(temp_dir, video_name, f"{video_name}_segment_{segment_number}.wmv", segment_number, frame_number, "Processed")
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
         executor.map(process_frame, os.listdir(temp_dir))
     
     logger.info(f"Removed background from all frames in the temp_dir")
 
 
-# get the mask of the moving objects using color segmentation
-def get_mask_color_segmentation(frame):
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-    #we are setting the parameters for the color segmentation based off of skin color
-    lower = (0, 48, 80)
-    upper = (20, 255, 255)
-
-    mask = cv2.inRange(hsv, lower, upper)
-
-    return mask
-
-# remove the background from the frame by combining the masks
-def remove_background(frame, mask1, mask2):
-    mask = cv2.bitwise_or(mask1, mask2)
-    result = cv2.bitwise_and(frame, frame, mask=mask)
-
-    return result
-
-
-#combine the processed frames into a video (wmv format)
-def combine_frames(output_folder, output_video):
-    print("Combining frames into a video...")
-    frame_files = [f for f in os.listdir(output_folder) if f.endswith(".png")]
-    #files are processed_frame_#.png. Sort them based on the number
-    frame_files.sort(key=lambda x: int(x.split("_")[2].split(".")[0]))
-
-    frame = cv2.imread(os.path.join(output_folder, frame_files[0]))
-    height, width, layers = frame.shape
-
-    fourcc = cv2.VideoWriter_fourcc(*"WMV1")
-    video = cv2.VideoWriter(output_video, fourcc, 30, (width, height))
-
-    for frame_file in frame_files:
-        frame = cv2.imread(os.path.join(output_folder, frame_file))
-        video.write(frame)
-
-    video.release()
-    print(f"Combined {len(frame_files)} frames into {output_video}")
-
-def get_mask_optical_flow(frame1, frame2):
-    # Convert frames to grayscale
-    gray1 = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
-    gray2 = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
-
-    # Calculate optical flow using Farneback method
-    flow = cv2.calcOpticalFlowFarneback(gray1, gray2, None, 0.5, 3, 15, 3, 5, 1.2, 0)
-
-    # Calculate magnitude and angle of optical flow
-    magnitude, angle = cv2.cartToPolar(flow[..., 0], flow[..., 1])
-
-    # Threshold the magnitude to get the moving objects
-    mask = cv2.threshold(magnitude, 10, 255, cv2.THRESH_BINARY)[1]
-
-    return mask
-
-# combine all images in an array of temp folders into a single video. 
-# sort first by the segment number, then by the frame number
-def combine_segment_videos(temp_dirs, output_video):
-    print("Combining segment videos...")
-    frames = []
-    for temp_dir in temp_dirs:
-        frame_files = [f for f in os.listdir(temp_dir) if f.endswith(".png")]
-        frame_files.sort(key=lambda x: int(x.split("_")[1].split(".")[0]))
-        for frame_file in frame_files:
-            frame = cv2.imread(os.path.join(temp_dir, frame_file))
-            frames.append(frame)
-
-    height, width, layers = frames[0].shape
-
-    fourcc = cv2.VideoWriter_fourcc(*"WMV1")
-    video = cv2.VideoWriter(output_video, fourcc, 30, (width, height))
-
-    for frame in frames:
-        video.write(frame)
-
-    video.release()
-    print(f"Combined {len(frames)} frames into {output_video}")
 
 def delete_temp_files(temp_dir):
     print("Deleting temporary files...")
@@ -214,58 +149,32 @@ def main(input_folder, output_folder, max_workers=4):
 
         # Calculate the number of segments based on desired chunk duration
         chunk_duration = 5  # Adjust this as needed (seconds)
-        num_segments = int(total_frames / (fps * chunk_duration)) + 1
+        try: 
+            num_segments = int(total_frames / (fps * chunk_duration)) + 1
+        except ZeroDivisionError:
+            num_segments = 1
         logger.info(f"Processing video {video_name} with {total_frames} frames at {fps} fps")
         print(f"There are {num_segments} segments in the video {video_name}. Frames per segment: {fps * chunk_duration}")
 
         for segment_number in range(num_segments):
-            # Check if the segment has already been processed, if so, skip it
-            if check_segment_processed(output_folder, video_name, segment_number):
-                print(f"Segment {segment_number} of video {video_name} has already been processed. Skipping...")
-                continue
+            #ch
             print(f"Processing segment {segment_number} of {num_segments} for video {video_name}...")
             segment_start = segment_number * chunk_duration * fps
             segment_end = min((segment_number + 1) * chunk_duration * fps, total_frames)
 
             video = cv2.VideoCapture(video_path)
-            temp_dir = f"temp_{video_name}_{segment_number}"
+            temp_dir = os.path.join(output_folder, f"temp_{video_name}_{segment_number}")
             os.makedirs(temp_dir, exist_ok=True)
 
             # Extract frames for the current segment
-            extract_frames(video, temp_dir, segment_start, chunk_duration)
+            extract_frames(video, temp_dir, segment_start, chunk_duration, segment_number, video_name)
 
             # Process frames to remove background
-            process_video(temp_dir)
+            process_video(temp_dir, segment_number, video_name)
 
-            # write to the index file
-            processed_video_name = f"{video_name}_segment_{segment_number}.wmv"
-            write_to_index_file(output_folder, video_name, processed_video_name, segment_number)
 
             video.release()
 
-    # Function to process each video segment
-    def process_segment(video_name):
-        video_segments = index[index["Video Name"] == video_name]
-        thisVideoTempDirs = []
-
-        for i in range(len(video_segments) - 1):
-            segment_number = video_segments.iloc[i]["Segment Number"]
-            processed_video_name = video_segments.iloc[i]["Processed Video Name"]
-            segment_path = os.path.join(output_folder, processed_video_name)
-            thisVideoTempDirs.append(f"temp_{video_name}_{segment_number}")
-
-        # Combine all segment videos into a single video
-        output_video = os.path.join(output_folder, f"{video_name}_processed.wmv")
-        combine_segment_videos(thisVideoTempDirs, output_video)
-
-        # Delete temporary files
-        for temp_dir in thisVideoTempDirs:
-            delete_temp_files(temp_dir)
-
-    # Use ThreadPoolExecutor to process video segments concurrently
-    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
-        futures = [executor.submit(process_segment, video_name) for video_name in list_of_files.values()]
-        concurrent.futures.wait(futures)
 
 
     print("All videos processed successfully")
