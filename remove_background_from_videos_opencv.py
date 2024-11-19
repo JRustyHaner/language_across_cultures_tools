@@ -178,6 +178,8 @@ def main(input_folder, output_folder, max_workers=4):
                 frame = cv2.imread(path)
                 frame = rembg.remove(frame)
                 cv2.imwrite(path, frame)
+                logger.info(f"Removed background from frame {path}")
+                os.rename(path, path.replace("frame", "processed_frame"))
                 return path
             
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
