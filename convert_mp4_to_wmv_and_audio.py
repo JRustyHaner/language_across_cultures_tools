@@ -1,3 +1,4 @@
+import time
 import os
 import sys
 from moviepy.editor import VideoFileClip
@@ -21,21 +22,21 @@ df = pd.DataFrame(columns=['filename'])
 def main_function(input_folder, output_folder_wmv):
     csv_filename = os.path.join(input_folder, 'converted_files.csv')
     while True:
+        try: 
+            df = pd.read_csv(csv_filename)
+        except:
+            df = pd.DataFrame(columns=['filename'])
+            df.to_csv(csv_filename, index=False)
+        #if all wmv files are inside the csv file, then wait 60 seconds before checking again
+        #get all wmv files
+        wmv_files = [f for f in os.listdir(output_folder_wmv) if f.endswith('.wmv')]
+        if len(wmv_files) == len(df):
+            print('All files have been converted')
+            time.sleep(60)
         for filename in os.listdir(input_folder):
-            #read the dataframe from the csv file
-            try:
-                df = pd.read_csv(csv_filename)
-            except:
-                df = pd.DataFrame(columns=['filename'])
-            #read the dataframe to see if the file has already been converted
-            if filename in df['filename']:
+            if filename in df['filename'].values:
                 print(f'{filename} already exists')
                 continue
-            else:
-                 # Write the filename to the dataframe and save it
-                df = df.append({'filename': filename}, ignore_index=True)
-                df.to_csv(csv_filename, index=False)
-            # Check if the file is an MP4 file
             if filename.endswith('.mp4'):
                 # Get the full path of the input file
                 input_path = os.path.join(input_folder, filename)
@@ -47,6 +48,8 @@ def main_function(input_folder, output_folder_wmv):
                 #check if the output files already exist
                 if os.path.exists(output_wmv_file):
                     print(f'{filename} already exists')
+                    #write file to index csv
+                    pd.concat([df,pd.DataFrame({'filename':[filename]})],ignore_index=True).to_csv(csv_filename, index=False)
                     continue
 
                 # Load the video file
