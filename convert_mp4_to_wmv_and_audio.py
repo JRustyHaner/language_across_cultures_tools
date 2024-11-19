@@ -19,11 +19,12 @@ df = pd.DataFrame(columns=['filename'])
 
 
 def main_function(input_folder, output_folder_wmv):
+    csv_filename = os.path.join(input_folder, 'converted_files.csv')
     while True:
         for filename in os.listdir(input_folder):
             #read the dataframe from the csv file
             try:
-                df = pd.read_csv('converted_files.csv')
+                df = pd.read_csv(csv_filename)
             except:
                 df = pd.DataFrame(columns=['filename'])
             #read the dataframe to see if the file has already been converted
@@ -33,7 +34,7 @@ def main_function(input_folder, output_folder_wmv):
             else:
                  # Write the filename to the dataframe and save it
                 df = df.append({'filename': filename}, ignore_index=True)
-                df.to_csv('converted_files.csv', index=False)
+                df.to_csv(csv_filename, index=False)
             # Check if the file is an MP4 file
             if filename.endswith('.mp4'):
                 # Get the full path of the input file
