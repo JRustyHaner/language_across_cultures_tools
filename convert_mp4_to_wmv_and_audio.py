@@ -30,6 +30,10 @@ def main_function(input_folder, output_folder_wmv):
             if filename in df['filename']:
                 print(f'{filename} already exists')
                 continue
+            else:
+                 # Write the filename to the dataframe and save it
+                df = df.append({'filename': filename}, ignore_index=True)
+                df.to_csv('converted_files.csv', index=False)
             # Check if the file is an MP4 file
             if filename.endswith('.mp4'):
                 # Get the full path of the input file
@@ -69,9 +73,7 @@ def main_function(input_folder, output_folder_wmv):
                 video.close()
             
 
-                # Write the filename to the dataframe and save it
-                df = df.append({'filename': filename}, ignore_index=True)
-                df.to_csv('converted_files.csv', index=False)
+               
 
 # main to set arguments
 if __name__ == '__main__':
