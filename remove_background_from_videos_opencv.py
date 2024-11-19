@@ -5,6 +5,7 @@ import os
 import sys
 import cv2
 import csv
+import numpy as np
 import concurrent.futures
 import logging
 import torch
@@ -85,29 +86,24 @@ def extract_frames(video, temp_dir, segment_start=0, segment_duration=CHUNK_DURA
 
     video.release()
 
-def process_video(temp_dir, output_folder):
+def process_video(temp_dir):
     # Remove all backgrounds of png files in the temp_dir using rembg with multithreading
     logger.info(f"Removing background from frames using rembg with multithreading...")
     file_count_total = len([f for f in os.listdir(temp_dir) if f.endswith(".png")])
     
-    def process_frame(file, output_folder):
+    def process_frame(file):
         print(f"Processing file #{file} out of {file_count_total}")
         if file.endswith(".png"):
-            if "processed" in file:
+            if not file.startswith("processed_"):
+                input_file = os.path.join(temp_dir, file)
+                output_file = os.path.join(temp_dir, f"processed_{file}")
+                with open(input_file, "rb") as input_image, open(output_file, "wb") as output_image:
+                    output_image.write(rembg.remove(input_image.read()))
+                # Delete the original file
+                os.remove(input_file)
+            else:
                 print(f"File {file} has already been processed. Skipping...")
-                return
-            input_file = os.path.join(temp_dir, file)
-            output_file = os.path.join(temp_dir, f"processed_{file}")
-            #output to the location of index_file inside a folder with the same name as the video with a subfolder for each segment
-            output_folder = output_folder + "/" + file.split("_")[0] + "/" + file.split("_")[1]
-            os.makedirs(output_folder, exist_ok=True)
-            output_file = os.path.join(output_folder, f"processed_{file}")
-            with open(input_file, "rb") as f:
-                output = rembg.remove(f.read())
-            with open(output_file, "wb") as f:
-                f.write(output)
-            # Delete the original file
-            os.remove(input_file)
+            print(f"Processed file #{file} out of {file_count_total}")
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
         executor.map(process_frame, os.listdir(temp_dir))
@@ -232,15 +228,14 @@ def main(input_folder, output_folder, max_workers=4):
             segment_end = min((segment_number + 1) * chunk_duration * fps, total_frames)
 
             video = cv2.VideoCapture(video_path)
-            #temp_dir is in the output folder with a subfolder for each segment
-            temp_dir = os.path.join(output_folder, f"temp_{video_name}_{segment_number}")
+            temp_dir = f"temp_{video_name}_{segment_number}"
             os.makedirs(temp_dir, exist_ok=True)
 
             # Extract frames for the current segment
             extract_frames(video, temp_dir, segment_start, chunk_duration)
 
             # Process frames to remove background
-            process_video(temp_dir, output_folder)
+            process_video(temp_dir)
 
             # write to the index file
             processed_video_name = f"{video_name}_segment_{segment_number}.wmv"
@@ -294,29 +289,33 @@ if __name__ == "__main__":
         if run_anyways.lower() != "y":
             sys.exit()
 
-    #delete the ~/.u2net folder if it exists
-    if os.path.exists(os.path.expanduser("~/.u2net")):
-        print("Deleting the ~/.u2net folder... or C:/Users/username/.u2net if you are on Windows")
-        if os.name == "nt":
-            os.system("rmdir /s /q C:/Users/%username%/.u2net")
-        else:
-            os.system("rm -rf ~/.u2net")
-        print("Deleted the ~/.u2net folder")
+    #if the model folder exists, delete it (~/.u2net or C:\Users\username\.u2net)
+    #windows delete C:\Users\username\.u2net
+    #if os is windows
+    if os.name == 'nt':
+        model_folder = os.path.join("C:\\Users", os.getlogin(), ".u2net")
+        if os.path.exists(model_folder):
+            #it might have files in it. Delete the files first
+            for file in os.listdir(model_folder):
+                os.remove(os.path.join(model_folder, file))
+            os.rmdir(model_folder)
+    #if os is not windows
+    else:
+        model_folder = os.path.join(os.path.expanduser("~"), ".u2net")
+        if os.path.exists(model_folder):
+            os.rmdir(model_folder)
 
-    #create a black image as png using cv2
-    print("Creating a black image...")
-    black_image = torch.zeros((320, 320, 3), dtype=torch.uint8)
-    cv2.imwrite("black_image.png", black_image.numpy())
-    #read the black image using with open
-    with open("black_image.png", "rb") as f:
-        output = rembg.remove(f.read())
-    #write the output to a file
-    with open("black_image_output.png", "wb") as f:
-        f.write(output)
-    #delete the black image and the output image
+    #use np/cv2 to create a black image, then use rembg to remove the background
+    print("Testing rembg...")
+    black_image = np.zeros((512, 512, 3), dtype=np.uint8)
+    cv2.imwrite("black_image.png", black_image)
+    with open("black_image.png", "rb") as input_image, open("black_image_processed.png", "wb") as output_image:
+        output_image.write(rembg.remove(input_image.read()))
+    #delete the black image
     os.remove("black_image.png")
-    os.remove("black_image_output.png")
-    print("Created a black image and tested rembg successfully")
+    os.remove("black_image_processed.png")
+    print("Tested rembg successfully")
+
 
     
 
