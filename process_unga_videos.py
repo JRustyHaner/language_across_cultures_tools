@@ -12,11 +12,11 @@ def write_to_processing_csv(input_folder, filename, function, status):
     #check if the processing csv exists
     processing_csv = os.path.join(input_folder, 'processing.csv')
     if not os.path.isfile(processing_csv):
-        df = pd.DataFrame(columns=['filename', 'function', 'status'])
+        df = pd.DataFrame(columns=['filename', 'function', 'status', 'host'])
         df.to_csv(processing_csv, index=False)
     #write to the processing csv
     df = pd.read_csv(processing_csv)
-    df = pd.concat([df, pd.DataFrame({'filename':[filename], 'function':[function], 'status':[status]})], ignore_index=True)
+    df = pd.concat([df, pd.DataFrame({'filename':[filename], 'function':[function], 'status':[status], 'host':[os.uname().nodename]})], ignore_index=True)
     df.to_csv(processing_csv, index=False)
 #read from processing csv to check if the file has been processed or is being processed
 def is_processing(input_folder, filename):
@@ -40,10 +40,11 @@ def extract_frames(input_folder, output_folder):
     if not os.path.isdir(output_folder):
         os.makedirs(output_folder)
     for filename in os.listdir(input_folder):
-        if is_processing(input_folder, filename, 'extract_frames'):
+        if is_processing(input_folder, filename): 
             print(f'{filename} already processed')
             continue
         if filename.endswith('.wmv') and not filename.startswith('#'):
+            print(f'Processing {filename}')
             #lock the file
             write_to_processing_csv(input_folder, filename, 'extract_frames', 'processing')
             # Get the full path of the input file
@@ -57,7 +58,12 @@ def extract_frames(input_folder, output_folder):
                 success, frame = video.read()
                 if not success:
                     break
-                frame_path = os.path.join(output_folder, f'{filename}_{frame_number}.jpg')
+                #frame path should be the output folder with a subfolder of the filename, with a file frame_number.jpg
+                #create the subfolder if it does not exist
+                frame_folder = os.path.join(output_folder, filename.split('.')[0])
+                if not os.path.isdir(frame_folder):
+                    os.makedirs(frame_folder)
+                frame_path = os.path.join(frame_folder, f'{frame_number}.jpg')
                 cv2.imwrite(frame_path, frame)
                 frame_number += 1
             video.release()
@@ -66,6 +72,7 @@ def extract_frames(input_folder, output_folder):
             print(f'Frames extracted from {filename}')
 
 def multithread_extract_frames(input_folder, output_folder, workers=4):
+    print('Multithreading extract_frames')
     #use concurrent futures to multithread the extraction of frames
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
         executor.map(extract_frames, input_folder, output_folder)
@@ -73,6 +80,7 @@ def multithread_extract_frames(input_folder, output_folder, workers=4):
 
 def remove_background_of_files(input_folder, output_folder):
     files = [f for f in os.listdir(input_folder) if f.endswith('.jpg') and not f.startswith('#')]
+    print(f'Files: {files.shape[0]}')
     #iterate over the files
     for filename in files:
         if is_processing(input_folder, filename, 'remove_background_of_files'):
@@ -136,7 +144,8 @@ def main_function(input_folder, output_folder_wmv):
     #we prioritize the extraction of frames first, then removing the background, then combining the frames into a WMV file
     #we will use multithreading to speed up the process
     #if no frames are available for extraction, we go to the next step
-    multithread_extract_frames(input_folder, output_folder_wmv)
+    print('Extracting frames')
+    extract_frames(input_folder, output_folder_wmv)
     
 # main to set arguments
 if __name__ == '__main__':
@@ -146,6 +155,8 @@ if __name__ == '__main__':
         sys.exit(1)
     input_folder = sys.argv[1]
     output_folder_wmv = sys.argv[2]
+    print(f'input_folder: {input_folder}, output_folder_wmv: {output_folder_wmv}')
+    main_function(input_folder, output_folder_wmv)
 
 
 
