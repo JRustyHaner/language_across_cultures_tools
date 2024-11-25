@@ -31,31 +31,6 @@ def create_index_file(output_folder):
         writer.writerow(["Video Name", "Processed Video Name"])
     logger.info(f"Index file created successfully in the output folder")
 
-# function to write the processed video name, segment number and the path to the index file
-def write_to_index_file(output_folder, video_name, processed_video_name, segment_number, action):
-    global index
-    #get one directory above the output folder
-    logger.info(f"Writing to index file in the output folder: {output_folder}")
-    #read the index file
-    if os.path.exists(os.path.join(output_folder, index_file)):
-        index = pd.read_csv(os.path.join(output_folder, index_file))
-    new_pd = pd.DataFrame([[video_name, processed_video_name, segment_number, action]], columns=["Video Name", "Processed Video Name", "Segment Number", "Action"])
-    index = pd.concat([index, new_pd], ignore_index=True)
-    index_file_final = index_file + "_" + video_name + "_" + segment_number + ".csv"
-    index.to_csv(os.path.join(output_folder, index_file), index=False)
-    print(f"Written to index file in the output folder: {output_folder}")
-
-        
-                  
-    logger.info(f"Written to index file successfully in the output folder")
-
-# function to check if the segment has already been processed
-def check_processed(output_folder, video_name, segment_number, frame_number):
-    logger.info(f"Checking if the segment has already been processed...")
-    if os.path.exists(os.path.join(output_folder, f"{video_name}_segment_{segment_number}_frame_{frame_number}.png")):
-        return True
-    return False
-
 
 
 
@@ -89,6 +64,8 @@ def extract_frames(video, temp_dir, segment_number, segment_duration=2, video_na
         ret, frame = video.read()
         if not ret:
             break
+        #remove any non alphanumeric files from the video name
+        video_name = ''.join(e for e in video_name if e.isalnum())
         # Save the frame as a png file
         frame_path = os.path.join(temp_dir, f"{video_name}_segment_{segment_number}_frame_{frame_number}.png")
         cv2.imwrite(frame_path, frame)
@@ -123,6 +100,42 @@ def process_video(temp_dir, segment_number, video_name):
         executor.map(process_frame, os.listdir(temp_dir))
     
     logger.info(f"Removed background from all frames in the temp_dir")
+
+
+def write_to_output_folder_processing_csv(output_folder, video_name, segment_number, action):
+    #get this machines hostname
+    hostname = os.uname().nodename
+    #write to the output folder processing csv
+    with open(os.path.join(output_folder, "processing.csv"), "a", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow([video_name, segment_number, action, hostname])
+
+#check if the segment has already been processed by checking if the output directory exists
+def check_processed(temp_dir, video_name, segment_number, frame_number):
+    #check if the frame has already been processed
+    if os.path.exists(os.path.join(temp_dir, f"{video_name}_segment_{segment_number}_frame_{frame_number}.png")):
+        return True
+    return False
+
+
+def check_if_the_segement_is_being_worked_on(output_folder, video_name, segment_number):
+    #check if the segment is being worked on
+    if os.path.exists(os.path.join(output_folder, "processing.csv")):
+        with open(os.path.join(output_folder, "processing.csv"), "r") as file:
+            reader = csv.reader(file)
+            for row in reader:
+                if row[0] == video_name and row[1] == segment_number:
+                    return True
+    return False
+
+def remove_from_processing_csv(output_folder, video_name, segment_number):
+    #remove the video from the processing csv
+    with open(os.path.join(output_folder, "processing.csv"), "r") as file:
+        reader = csv.reader(file)
+        rows = [row for row in reader if row[0] != video_name and row[1] != segment_number]
+    with open(os.path.join(output_folder, "processing.csv"), "w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerows(rows)
 
 
 
@@ -160,6 +173,16 @@ def main(input_folder, output_folder, max_workers=4):
 
         #for each segment, extract the frames, remove the background and save the processed frames
         for segment_number in range(num_segments):
+            #lock the segment so that it is not processed by multiple threads
+            if check_if_the_segement_is_being_worked_on(output_folder, video_name, segment_number):
+                print(f"Segment {segment_number} of video {video_name} is being processed by another thread. Skipping...")
+                continue
+            #check if the segment has already been processed
+            if os.path.exists(os.path.join(output_folder, f"{video_name}_segment_{segment_number}.mp4")):
+                print(f"Segment {segment_number} of video {video_name} has already been processed. Skipping...")
+                continue
+            write_to_output_folder_processing_csv(output_folder, video_name, segment_number, "processing")
+            # Create a temporary directory for the frames
             temp_dir = os.path.join(output_folder, "temp_" + video_name + "_segment_" + str(segment_number))
             if not os.path.exists(temp_dir):
                 os.makedirs(temp_dir)
@@ -181,6 +204,7 @@ def main(input_folder, output_folder, max_workers=4):
                 frame_path = os.path.join(temp_dir, f"{video_name}_segment_{segment_number}_frame_{frame_number}.png")
                 frame_paths.append(frame_path)
 
+
             
             def remove_background_from_frame(path):
                 #if the processed frame already exists, skip it
@@ -194,8 +218,36 @@ def main(input_folder, output_folder, max_workers=4):
                 os.rename(path, path.replace("frame", "processed_frame"))
                 return path
             
+            #remove the background from the frames and combine them into a video
+            def remove_background_and_combine_into_video(frame_paths):
+                #remove the background from the frames
+                for frame_path in frame_paths:
+                    remove_background_from_frame(frame_path)
+                #combine the frames into a video
+                video_name = frame_paths[0].split("_")[0]
+                segment_number = frame_paths[0].split("_")[2]
+                output_video = os.path.join(output_folder, f"{video_name}_segment_{segment_number}.mp4")
+                frame = cv2.imread(frame_paths[0])
+                height, width, _ = frame.shape
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                out = cv2.VideoWriter(output_video, fourcc, fps, (width, height))
+                for frame_path in frame_paths:
+                    frame = cv2.imread(frame_path)
+                    out.write(frame)
+                out.release()
+                #write to the index file
+                
+                return frame_paths
+            
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                executor.map(remove_background_from_frame, frame_paths)
+                executor.map(remove_background_and_combine_into_video, frame_paths)
+            
+            #wait for the threads to finish
+            executor.shutdown(wait=True)
+            #remove the temporary directory
+            delete_temp_files(temp_dir)
+            #remove the video from the processing csv
+            remove_from_processing_csv(output_folder, video_name, segment_number)
                 
 
 
@@ -230,11 +282,23 @@ if __name__ == "__main__":
             for file in os.listdir(model_folder):
                 os.remove(os.path.join(model_folder, file))
             os.rmdir(model_folder)
-    #if os is not windows
-    else:
+    #if os is Linux
+    elif os.name == 'posix':
         model_folder = os.path.join(os.path.expanduser("~"), ".u2net")
         if os.path.exists(model_folder):
+            #delete the files in the folder
+            for file in os.listdir(model_folder):
+                os.remove(os.path.join(model_folder, file))
+
+    #if os is mac
+    elif os.name == 'mac':
+        model_folder = os.path.join(os.path.expanduser("~"), ".u2net")
+        if os.path.exists(model_folder):
+            #delete the files in the folder
+            for file in os.listdir(model_folder):
+                os.remove(os.path.join(model_folder, file))
             os.rmdir(model_folder)
+
 
     #use np/cv2 to create a black image, then use rembg to remove the background
     print("Testing rembg...")
